@@ -1,0 +1,421 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Silent Horn — Stable + Chime & Vibration</title>
+<style>
+  :root{--orange:#ff6600;--bg:#0b0b0b;--muted:#cfcfcf}
+  body{margin:0;font-family:Inter,system-ui,Roboto,Arial;background:linear-gradient(180deg,#070707,#0b0b0b);color:var(--muted)}
+  .wrap{max-width:980px;margin:18px auto;padding:18px;border-radius:12px;background:linear-gradient(180deg,#0a0a0a,#151515);box-shadow:0 10px 40px rgba(0,0,0,0.6)}
+  header{display:flex;align-items:center;gap:12px}
+  .title{color:var(--orange);font-weight:800;font-size:20px}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  button{background:var(--orange);color:#111;border:0;padding:10px 14px;border-radius:10px;font-weight:800;cursor:pointer}
+  button.ghost{background:transparent;border:1px solid rgba(255,102,0,0.14);color:var(--muted)}
+  .center{display:flex;flex-direction:column;align-items:center;gap:14px;padding:18px}
+  .distanceCard{width:360px;height:260px;border-radius:14px;background:linear-gradient(180deg,#111,#0d0d0d);display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 18px 40px rgba(0,0,0,0.6);border:1px solid rgba(255,102,0,0.06)}
+  .distanceVal{font-size:96px;font-weight:900;color:#fff;letter-spacing:-2px}
+  .distanceUnit{font-size:18px;color:var(--muted);margin-top:6px}
+  .distanceNote{font-size:13px;color:#bbb;margin-top:8px}
+  .distanceCard.alert{box-shadow:0 24px 60px rgba(255,102,0,0.2), 0 0 40px rgba(255,102,0,0.06) inset;border:1px solid rgba(255,102,0,0.35);animation:pulseOrange 1000ms infinite ease-in-out;}
+  @keyframes pulseOrange{0%{transform:scale(1)}50%{transform:scale(1.02)}100%{transform:scale(1)}}
+  .metaRow{display:flex;gap:12px;justify-content:center;margin-top:10px}
+  .meta{background:#0a0a0a;padding:8px 12px;border-radius:10px;color:#bbb;font-weight:700}
+  .arrowBox{width:160px;height:160px;border-radius:50%;border:6px solid rgba(255,255,255,0.03);display:flex;align-items:center;justify-content:center;margin-top:6px;position:relative}
+  #needle{width:6px;height:70px;background:var(--orange);position:absolute;bottom:35%;border-radius:6px;transform-origin:50% 90%;transition:transform 240ms cubic-bezier(.2,.9,.2,1)}
+  #debug{width:100%;height:140px;margin-top:12px;background:#080808;color:#9fff9f;padding:8px;border-radius:8px;font-family:monospace;font-size:12px;overflow:auto}
+  .status{color:#ddd;margin-top:6px;font-size:13px}
+  .bigHorn{background:#ff3b30;color:#fff;padding:18px 28px;border-radius:18px;font-size:20px;font-weight:900;border:0;box-shadow:0 12px 30px rgba(255,59,48,0.16)}
+  .responders{width:100%;max-width:920px;margin:10px auto 0;padding:12px;border-radius:10px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#ddd}
+  .resp-title{font-weight:800;color:var(--orange);margin-bottom:8px}
+  .resp-list{list-style:none;padding:0;margin:0;max-height:160px;overflow:auto}
+  .resp-item{padding:8px;border-bottom:1px dashed rgba(255,255,255,0.03);display:flex;justify-content:space-between;gap:12px}
+  .resp-id{font-weight:700}
+  .small{font-size:12px;color:#aaa}
+  body.fast-flash{transition:background 0s !important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="title">Silent Horn</div>
+      <div style="color:#bbb;font-size:12px">Very stable distance, synced responses, chime & vibration</div>
+    </div>
+  </header>
+
+  <div class="controls">
+    <button id="reqPerm">Enable Location & Orientation</button>
+    <button id="enableAudio" class="ghost">Enable Audio</button>
+    <button id="testTone" class="ghost">Play Test Tone</button>
+    <button id="hornBtn" class="bigHorn" style="margin-left:auto">HORN</button>
+  </div>
+
+  <div class="center">
+    <div class="distanceCard" id="distanceCard" aria-live="polite">
+      <div class="distanceVal" id="distanceVal">—</div>
+      <div class="distanceUnit" id="distanceUnit">meters</div>
+      <div class="distanceNote" id="distanceNote">Waiting for GPS fix & permissions...</div>
+    </div>
+
+    <div class="metaRow">
+      <div class="meta">Your ID: <span id="myid">...</span></div>
+      <div class="meta">Last from: <span id="lastFrom">—</span></div>
+      <div class="meta">Status: <span id="status">Idle</span></div>
+    </div>
+
+    <div class="arrowBox" title="Approx. absolute bearing (visual only)">
+      <div id="needle" style="transform:rotate(0deg)"></div>
+    </div>
+
+    <div class="status">Note: open in Chrome/Safari (not in-app browser). HTTPS required.</div>
+
+    <pre id="debug">debug ready...</pre>
+  </div>
+
+  <div class="responders" id="respondersPanel">
+    <div class="resp-title">Responders (latest)</div>
+    <ul class="resp-list" id="respList"></ul>
+  </div>
+</div>
+
+<!-- chime audio (350ms) -->
+<audio id="chime" preload="auto">
+  <!-- small 350ms placeholder chime; replace with your WAV/MP3 if desired -->
+  <source src="data:audio/wav;base64,UklGRkwAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAAA/////wAAAP///wAA/////wAAAP///wAA/////wAAAP///wAA/////wAAAP///wAA/////wAAAP///wAA/////wAAAP///wAA" />
+</audio>
+
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+
+<script>
+/* ===== CONFIG: tuned for VERY STABLE behavior ===== */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDEqx20Id0d8_hayEhk-syuUVNshHUjxcw",
+  authDomain: "silent-a7aae.firebaseapp.com",
+  databaseURL: "https://silent-a7aae-default-rtdb.firebaseio.com",
+  projectId: "silent-a7aae",
+  storageBucket: "silent-a7aae.firebasestorage.app",
+  messagingSenderId: "333807832648",
+  appId: "1:333807832648:web:f26dc85699b30a6301927d"
+};
+
+const TUNING = {
+  positionWindow: 9,
+  gpsAlpha: 0.15,
+  alertDistanceM: 20,
+  dedupMs: 700,
+  extrapolateMs: 300,
+  kalmanR: 40,
+  kalmanQ: 0.005
+};
+/* ==================================================== */
+
+firebase.initializeApp(FIREBASE_CONFIG);
+const db = firebase.database();
+
+/* UI refs */
+const reqPermBtn = document.getElementById('reqPerm');
+const enableAudioBtn = document.getElementById('enableAudio');
+const testToneBtn = document.getElementById('testTone');
+const hornBtn = document.getElementById('hornBtn');
+const distanceVal = document.getElementById('distanceVal');
+const distanceNote = document.getElementById('distanceNote');
+const distanceCard = document.getElementById('distanceCard');
+const lastFrom = document.getElementById('lastFrom');
+const statusEl = document.getElementById('status');
+const debugEl = document.getElementById('debug');
+const needle = document.getElementById('needle');
+const myidEl = document.getElementById('myid');
+const respList = document.getElementById('respList');
+
+let myId = 'p' + Math.floor(Math.random()*9000+1000);
+myidEl.textContent = myId;
+
+/* state */
+let posWindow = [];
+let smoothDistance = null;
+let lastEventTs = {};
+let audioUnlocked = false;
+let watchId = null;
+
+/* debug helper */
+function dbg(...args){ debugEl.textContent = new Date().toLocaleTimeString() + ' ▶ ' + args.map(a=> (typeof a==='object'?JSON.stringify(a):a)).join(' ') + '\n' + debugEl.textContent; }
+
+/* unified chime + vibrate utility */
+const chime = document.getElementById('chime');
+
+async function unlockAudio() {
+  try {
+    await chime.play();
+    chime.pause();
+    chime.currentTime = 0;
+    audioUnlocked = true;
+    enableAudioBtn.classList.add('ghost');
+    enableAudioBtn.textContent = 'Audio Enabled';
+    dbg('Audio unlocked');
+  } catch (e) {
+    dbg('Audio unlock failed', e && e.message);
+  }
+}
+
+function playChimeAndVibrate({vibratePattern = [200,80,200], allowVibrate = true} = {}) {
+  // Play chime
+  try {
+    chime.currentTime = 0;
+    chime.play().catch(err => { dbg('chime play fail', err && err.message); });
+  } catch (e) {
+    dbg('chime play exception', e && e.message);
+  }
+  // Vibrate (Android)
+  if (allowVibrate && navigator.vibrate) {
+    try { navigator.vibrate(vibratePattern); } catch (e) { dbg('vibrate failed', e && e.message); }
+  }
+}
+
+/* rotate needle */
+let currentNeedleAngle = 0;
+function rotateNeedle(angle){
+  angle = ((angle%360)+360)%360;
+  const diff = ((angle - currentNeedleAngle + 540) % 360) - 180;
+  currentNeedleAngle = (currentNeedleAngle + diff);
+  needle.style.transform = `rotate(${currentNeedleAngle}deg)`;
+}
+
+/* sliding window position */
+function addPosition(p){
+  posWindow.push(p);
+  if (posWindow.length > TUNING.positionWindow) posWindow.shift();
+}
+function avgPosition(){
+  if (!posWindow.length) return null;
+  const lats = posWindow.map(x=>x.lat).slice().sort((a,b)=>a-b);
+  const lons = posWindow.map(x=>x.lon).slice().sort((a,b)=>a-b);
+  const mid = Math.floor(lats.length/2);
+  const medLat = lats[mid], medLon = lons[mid];
+  const close = posWindow.filter(p => {
+    const d = haversineDistance(medLat, medLon, p.lat, p.lon);
+    return d < 60;
+  });
+  if (!close.length) return posWindow[posWindow.length-1];
+  const avgLat = close.reduce((s,p)=>s+p.lat,0)/close.length;
+  const avgLon = close.reduce((s,p)=>s+p.lon,0)/close.length;
+  const avgAcc = close.reduce((s,p)=>s+(p.acc||100),0)/close.length;
+  return {lat:avgLat, lon:avgLon, acc:avgAcc, t: close[close.length-1].t};
+}
+
+/* haversine & bearing */
+function toRad(d){ return d*Math.PI/180; }
+function toDeg(r){ return r*180/Math.PI; }
+function haversineDistance(lat1,lon1,lat2,lon2){
+  const R = 6371000;
+  const dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  const c = 2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R*c;
+}
+function bearingDegrees(lat1,lon1,lat2,lon2){
+  const φ1 = toRad(lat1), φ2 = toRad(lat2), Δλ = toRad(lon2-lon1);
+  const y = Math.sin(Δλ)*Math.cos(φ2);
+  const x = Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+  return (toDeg(Math.atan2(y,x))+360)%360;
+}
+
+/* simple 1D Kalman */
+function createKalman(r = TUNING.kalmanR, q = TUNING.kalmanQ){
+  let x = null, p = 1;
+  return {
+    step: function(meas){
+      if (meas == null) return x;
+      if (x == null){ x = meas; p = 1; return x; }
+      p = p + q;
+      const k = p / (p + r);
+      x = x + k*(meas - x);
+      p = (1 - k)*p;
+      return x;
+    }
+  };
+}
+const kf = createKalman();
+
+/* permissions flow */
+async function requestPermissions(){
+  dbg('permission flow start');
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+    try { const res = await DeviceOrientationEvent.requestPermission(); dbg('orientation perm', res);} catch(e){ dbg('orientation request err', e && e.message); }
+  }
+  if (!navigator.geolocation){ dbg('no geolocation'); distanceNote.textContent='Geolocation not available'; return; }
+  try {
+    await new Promise((resolve,reject)=>{
+      let done=false;
+      navigator.geolocation.getCurrentPosition(p=>{
+        if (!done){ done=true; resolve(p); }
+      }, err=>{ if (!done){ done=true; reject(err); } }, {enableHighAccuracy:true, timeout:8000});
+      setTimeout(()=>{ if (!done){ done=true; reject(new Error('timeout')); } },9000);
+    });
+    dbg('location permission granted');
+    distanceNote.textContent = 'Location permission granted — waiting for GPS fix...';
+    startWatchPosition();
+  } catch(e){
+    dbg('location permission failed', e && e.message);
+    distanceNote.textContent = 'Location permission denied — open site settings';
+  }
+}
+
+/* watchPosition */
+function startWatchPosition(){
+  if (!navigator.geolocation) return;
+  if (watchId != null) return;
+  watchId = navigator.geolocation.watchPosition(p=>{
+    addPosition({lat:p.coords.latitude, lon:p.coords.longitude, acc:p.coords.accuracy, t:Date.now()});
+    dbg('pos', p.coords.latitude.toFixed(6), p.coords.longitude.toFixed(6), 'acc', Math.round(p.coords.accuracy));
+  }, err=>{
+    dbg('watchPosition err', err && err.message);
+  }, { enableHighAccuracy:true, maximumAge:800, timeout:5000 });
+}
+
+/* DB listeners */
+const hornsRef = db.ref('horns');
+hornsRef.limitToLast(50).on('child_added', snap=>{
+  const data = snap.val();
+  if (!data) return;
+  const sender = data.senderId;
+  const now = Date.now();
+  if ((lastEventTs[sender]||0) + TUNING.dedupMs > now){ dbg('dedup', sender); return; }
+  dbg('horn event', snap.key, sender);
+  lastEventTs[sender] = now;
+  handleHorn(snap.key, data);
+});
+
+/* responders map to show in sender UI */
+const responders = {}; // responderId -> {distance, ts}
+
+/* handle incoming horn (receiver side) */
+async function handleHorn(hornKey, data){
+  lastFrom.textContent = data.senderId + ' @ ' + new Date(data.timestamp).toLocaleTimeString();
+  const own = avgPosition();
+  if (!own){
+    dbg('no own pos — cannot compute distance');
+    distanceVal.textContent='—';
+    distanceNote.textContent='No GPS fix — open in Chrome/Safari and allow location';
+    playChimeAndVibrate({vibratePattern:[200,80,200]});
+    return;
+  }
+  if (data.lat == null || data.lon == null){
+    dbg('sender missing coords');
+    distanceVal.textContent='—';
+    distanceNote.textContent='Sender location unavailable (they may be in-app browser).';
+    playChimeAndVibrate({vibratePattern:[200,80,200]});
+    return;
+  }
+
+  let sLat = data.lat, sLon = data.lon;
+  if (data.heading != null && data.speed != null && data.timestamp){
+    const ageMs = Date.now() - data.timestamp + TUNING.extrapolateMs;
+    const dt = Math.max(0, ageMs)/1000;
+    const d = (data.speed || 0) * dt;
+    const R = 6371000;
+    const brng = toRad(data.heading);
+    const lat1 = toRad(sLat), lon1 = toRad(sLon);
+    const lat2 = Math.asin(Math.sin(lat1)*Math.cos(d/R) + Math.cos(lat1)*Math.sin(d/R)*Math.cos(brng));
+    const lon2 = lon1 + Math.atan2(Math.sin(brng)*Math.sin(d/R)*Math.cos(lat1), Math.cos(d/R)-Math.sin(lat1)*Math.sin(lat2));
+    sLat = lat2*180/Math.PI; sLon = lon2*180/Math.PI;
+  }
+
+  const rawDist = Math.round(haversineDistance(own.lat, own.lon, sLat, sLon));
+  const rawBear = Math.round(bearingDegrees(own.lat, own.lon, sLat, sLon));
+  rotateNeedle(rawBear);
+
+  smoothDistance = (smoothDistance == null) ? rawDist : (smoothDistance*(1-TUNING.gpsAlpha) + rawDist*TUNING.gpsAlpha);
+  const kdist = Math.round(kf.step(smoothDistance));
+
+  distanceVal.textContent = kdist;
+  distanceNote.textContent = `Approx. distance • GPS acc: ${Math.round(own.acc)} m`;
+  statusEl.textContent = 'Alert received';
+
+  if (kdist <= TUNING.alertDistanceM){
+    distanceCard.classList.add('alert');
+    playChimeAndVibrate({vibratePattern:[200,80,200]});
+  } else {
+    distanceCard.classList.remove('alert');
+    playChimeAndVibrate({vibratePattern:[120]});
+  }
+
+  dbg('computed rawDist', rawDist, 'smoothed', Math.round(smoothDistance), 'kf', kdist);
+
+  // write response so sender(s) see same value
+  try {
+    await db.ref(`responses/${hornKey}/${myId}`).set({ distance: kdist, sender: data.senderId, timestamp: Date.now() });
+    dbg('response written', hornKey, myId, kdist);
+  } catch(e){ dbg('response write failed', e && e.message); }
+}
+
+/* sender: listen for responses and maintain responders list */
+async function sendHorn(){
+  const own = avgPosition();
+  const payload = { type:'horn', senderId: myId, timestamp: Date.now(), lat: own?own.lat:null, lon: own?own.lon:null, heading: null, speed: null };
+  const newRef = db.ref('horns').push();
+  await newRef.set(payload);
+  const hornKey = newRef.key;
+  dbg('horn sent', hornKey, payload);
+  statusEl.textContent = 'Horn sent — waiting for responses';
+  distanceNote.textContent = 'Waiting for receiver responses...';
+  // listen for responses
+  const respRef = db.ref(`responses/${hornKey}`);
+  const onResp = snap => {
+    const r = snap.val();
+    if (!r) return;
+    const responderId = snap.key;
+    responders[responderId] = { distance: r.distance, ts: r.timestamp };
+    updateRespondersUI();
+    distanceVal.textContent = r.distance;
+    distanceNote.textContent = `Response from ${responderId} • ${new Date(r.timestamp).toLocaleTimeString()}`;
+    playChimeAndVibrate({vibratePattern:[120]});
+    dbg('response received', responderId, r.distance);
+  };
+  respRef.on('child_added', onResp);
+  // stop listening after 8s
+  setTimeout(()=> { respRef.off('child_added', onResp); dbg('stopped listening for responses', hornKey); }, 8000);
+}
+
+/* update responders list UI */
+function updateRespondersUI(){
+  const items = Object.entries(responders)
+    .sort((a,b)=> b[1].ts - a[1].ts)
+    .slice(0,20);
+  respList.innerHTML = '';
+  items.forEach(([id, info])=>{
+    const li = document.createElement('li');
+    li.className = 'resp-item';
+    li.innerHTML = `<div class="resp-id">${id}</div><div class="resp-dist">${info.distance} m <div class="small">${new Date(info.ts).toLocaleTimeString()}</div></div>`;
+    respList.appendChild(li);
+  });
+}
+
+/* horn button */
+hornBtn.addEventListener('click', ()=>{
+  const own = avgPosition();
+  if (!own){
+    dbg('sending without GPS fix; receivers may show NaN');
+    distanceNote.textContent = 'No GPS fix — your location may be missing';
+  }
+  sendHorn().catch(e=>dbg('send error', e && e.message));
+});
+
+/* DB debug root watch (optional) */
+db.ref('responses').limitToLast(10).on('child_added', snap => {
+  dbg('responses root child added', snap.key);
+});
+
+/* permission & audio buttons */
+reqPermBtn.addEventListener('click', requestPermissions);
+enableAudioBtn.addEventListener('click', unlockAudio);
+testToneBtn.addEventListener('click', ()=> playChimeAndVibrate({vibratePattern:[120]}));
+
+/* initial debug message */
+dbg('stable-distance + chime app ready — click Enable Location & Orientation then Enable Audio. Open in Chrome/Safari over HTTPS.');
+</script>
+</body>
+</html>

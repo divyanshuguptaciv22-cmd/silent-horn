@@ -3,28 +3,33 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Silent Horn — Fixed v2</title>
+<title>Silent Horn — Flash Upgrade</title>
 <style>
-  body { font-family: system-ui, -apple-system, Roboto, Arial; margin:0; display:flex; flex-direction:column; height:100vh; background:white; }
-  header { padding:12px; background:#0b84ff; color:white; text-align:center; }
-  main { flex:1; display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; padding:12px; }
-  .big { font-size:18px; padding:12px 18px; border-radius:10px; background:#111; color:white; box-shadow:0 6px 14px rgba(0,0,0,0.2); }
-  #horn { font-size:24px; width:70%; max-width:420px; text-align:center; padding:16px; border-radius:16px; background:#ff3b30; color:white; }
-  #arrow { width:220px; height:220px; border-radius:50%; border:6px solid #eee; display:flex; align-items:center; justify-content:center; position:relative; }
-  #needle { width:6px; height:90px; background:#0b84ff; position:absolute; bottom:50%; border-radius:6px; transform-origin:50% 90%; transition: transform 200ms linear; box-shadow:0 6px 12px rgba(0,0,0,0.2); }
-  .info { font-size:14px; color:#333; }
-  footer { padding:8px; text-align:center; font-size:12px; color:#666; }
-  button { padding:10px 12px; border-radius:10px; border:0; background:#0b84ff; color:white; font-weight:600; }
-  #debug { width:94%; max-width:720px; height:120px; overflow:auto; background:#111; color:#0f0; font-family:monospace; padding:8px; border-radius:8px; font-size:12px; }
-  .muted { opacity:0.6; }
+  :root {
+    --orange: #ff6600;
+    --bg: white;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Roboto,Arial}
+  header{padding:12px;background:var(--orange);color:#fff;text-align:center}
+  main{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px;min-height:calc(100vh - 120px)}
+  .big{font-size:18px;padding:12px 18px;border-radius:10px;background:#111;color:#fff;border:0}
+  #horn{font-size:24px;padding:16px 20px;border-radius:16px;background:#ff3b30;color:#fff}
+  #arrow{width:220px;height:220px;border-radius:50%;border:6px solid #eee;display:flex;align-items:center;justify-content:center;position:relative}
+  #needle{width:6px;height:90px;background:var(--orange);position:absolute;bottom:50%;border-radius:6px;transform-origin:50% 90%;transition:transform 180ms linear;box-shadow:0 6px 12px rgba(0,0,0,0.18)}
+  .info{font-size:14px;color:#333}
+  footer{padding:8px;text-align:center;font-size:12px;color:#666}
+  #debug{width:94%;max-width:720px;height:110px;overflow:auto;background:#111;color:#0f0;font-family:monospace;padding:8px;border-radius:8px;font-size:12px}
+  .muted{opacity:0.6}
+  /* ensure quick transitions when flashing */
+  body.fast-flash { transition: background 0s !important; }
 </style>
 </head>
 <body>
-<header><strong>Silent Horn — Fixed v2</strong></header>
+<header><strong>Silent Horn — Flash Upgrade</strong></header>
 <main>
   <div class="info">Your ID: <span id="myid">...</span></div>
 
-  <div style="display:flex;gap:8px; flex-wrap:wrap; justify-content:center">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
     <button id="reqPerm" class="big">Enable Orientation & Location</button>
     <button id="enableAudio" class="big">Enable Audio</button>
     <button id="testTone" class="big" style="background:#666">Play Test Tone</button>
@@ -36,7 +41,7 @@
 
   <div class="info">Relative: <span id="rel">—</span> | Distance: <span id="dist">—</span> m</div>
 
-  <button id="horn" class="big">HORN 🔊</button>
+  <button id="horn" class="big" style="background:#ff3b30">HORN 🔊</button>
 
   <div class="info">Last horn from: <span id="lastFrom">—</span></div>
 
@@ -44,15 +49,13 @@
     <button id="calibrate" class="big">Calibrate</button>
   </div>
 
-  <div style="width:94%; max-width:720px; margin-top:10px;">
-    <div style="font-weight:700; margin-bottom:6px">Debug</div>
+  <div style="width:94%;max-width:720px;margin-top:10px;">
+    <div style="font-weight:700;margin-bottom:6px">Debug</div>
     <pre id="debug">waiting...</pre>
   </div>
 </main>
 
-<footer>
-  Make sure both phones have this page open and permissions granted.
-</footer>
+<footer>Make sure both phones have this page open and permissions granted.</footer>
 
 <!-- short beep -->
 <audio id="alertSound" preload="auto">
@@ -64,7 +67,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
 
 <script>
-/* ====== PASTE YOUR FIREBASE CONFIG BELOW (replace values) ====== */
+/* ====== FIREBASE CONFIG ====== */
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDEqx20Id0d8_hayEhk-syuUVNshHUjxcw",
   authDomain: "silent-a7aae.firebaseapp.com",
@@ -75,12 +78,12 @@ const FIREBASE_CONFIG = {
   appId: "1:333807832648:web:f26dc85699b30a6301927d",
   measurementId: "G-QXZB89YG0G"
 };
-/* =============================================================== */
+/* ============================ */
 
 firebase.initializeApp(FIREBASE_CONFIG);
 const db = firebase.database();
 
-// UI
+// UI refs
 const myidEl = document.getElementById('myid');
 const hornBtn = document.getElementById('horn');
 const reqPerm = document.getElementById('reqPerm');
@@ -94,78 +97,66 @@ const calibrateBtn = document.getElementById('calibrate');
 const debugEl = document.getElementById('debug');
 const alertSound = document.getElementById('alertSound');
 
-let audioUnlocked = false;
-let audioAllowed = false;
-
 let myId = 'p' + Math.floor(Math.random()*9000+1000);
 let myLat = null, myLon = null;
-let myHeading = null; // degrees or null
+let myHeading = null;
 let calibOffset = 0;
+
 myidEl.textContent = myId;
 
-// debug helper
+// small debug helper
 function dbg(...args){
   const t = new Date().toLocaleTimeString();
-  debugEl.textContent = t + ' ▶ ' + args.map(a=> (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ') + '\n' + debugEl.textContent;
+  debugEl.textContent = t + ' ▶ ' + args.map(a=> (typeof a==='object'?JSON.stringify(a):String(a))).join(' ') + '\n' + debugEl.textContent;
 }
 
-// enable audio (user gesture to unlock play())
+// audio unlock
+let audioUnlocked = false;
 enableAudioBtn.addEventListener('click', async ()=>{
   try {
     await alertSound.play();
     alertSound.pause();
     alertSound.currentTime = 0;
     audioUnlocked = true;
-    audioAllowed = true;
-    enableAudioBtn.classList.remove('big');
     enableAudioBtn.classList.add('muted');
     dbg('Audio unlocked');
   } catch(e){
-    audioUnlocked = false;
-    dbg('Audio unlock failed', e.message || e);
-    // still allow vibration fallback later
+    dbg('Audio unlock failed', e && e.message);
   }
 });
 
-// Test tone
-testToneBtn.addEventListener('click', ()=> {
-  if (audioUnlocked) {
-    alertSound.play().catch(e => dbg('play failed', e.message));
-  } else {
-    // try anyway
-    alertSound.play().then(()=>{}).catch(()=>{ navigator.vibrate && navigator.vibrate(200); dbg('vibrate fallback'); });
+testToneBtn.addEventListener('click', ()=>{
+  if (audioUnlocked) alertSound.play().catch(e=>dbg('play failed', e && e.message));
+  else {
+    alertSound.play().catch(()=>{ navigator.vibrate && navigator.vibrate(200); dbg('vibrate fallback'); });
   }
 });
 
-// Location: use watchPosition for continuous updates
+// Location watch
 let watchId = null;
 function startWatchPosition(){
   if (!navigator.geolocation) { dbg('No geolocation'); return; }
   if (watchId != null) return;
   watchId = navigator.geolocation.watchPosition(p=>{
-    myLat = p.coords.latitude;
-    myLon = p.coords.longitude;
+    myLat = p.coords.latitude; myLon = p.coords.longitude;
     dbg('pos', myLat.toFixed(6), myLon.toFixed(6), 'acc', p.coords.accuracy + 'm');
-  }, err=>{
-    dbg('geo err', err.code, err.message);
-  }, { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
+  }, err=> dbg('geo err', err.code, err.message), { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
 }
 startWatchPosition();
 
-// Orientation permissions & handlers
+// Request orientation & location permissions
 reqPerm.addEventListener('click', async ()=>{
-  // Device orientation permission for iOS
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
     try {
       const res = await DeviceOrientationEvent.requestPermission();
       dbg('orientation permission', res);
-    } catch(e){ dbg('orientation permission err', e.message); }
+    } catch(e){ dbg('orientation permission err', e && e.message); }
   }
-  // prompt location (also starts watch)
-  if (navigator.geolocation) navigator.geolocation.getCurrentPosition(()=> dbg('geo prompt ok'), e=> dbg('geo prompt failed', e.message), { enableHighAccuracy:true });
+  if (navigator.geolocation) navigator.geolocation.getCurrentPosition(()=> dbg('geo granted'), e=> dbg('geo prompt failed', e && e.message), { enableHighAccuracy:true });
   reqPerm.classList.add('muted');
 });
 
+// orientation listeners
 window.addEventListener('deviceorientationabsolute', e=>{
   if (e && e.alpha != null) {
     myHeading = (360 - e.alpha + calibOffset) % 360;
@@ -187,7 +178,7 @@ calibrateBtn.addEventListener('click', ()=> {
   alert('Calibrated');
 });
 
-// math helpers
+// geodesy helpers
 function toRad(d){ return d*Math.PI/180; }
 function toDeg(r){ return r*180/Math.PI; }
 function bearingDegrees(lat1, lon1, lat2, lon2){
@@ -205,7 +196,26 @@ function distanceMeters(lat1,lon1,lat2,lon2){
   return R*c;
 }
 
-// Firebase horns listen
+/* ================= STRONG FLASH EFFECT (Option A) =================
+   Ultra-visible: WHITE -> ORANGE -> WHITE, very short durations.
+   safe timings: quick to grab attention but not overwhelming.
+   ================================================================== */
+function strongFlash() {
+  // add class to disable transitions for instant color change
+  document.body.classList.add('fast-flash');
+  // immediate bright white
+  document.body.style.background = '#ffffff';
+  // after 70ms switch to orange
+  setTimeout(()=> { document.body.style.background = getComputedStyle(document.documentElement).getPropertyValue('--orange').trim() || '#ff6600'; }, 70);
+  // return to normal after 210ms
+  setTimeout(()=> {
+    document.body.style.background = 'white';
+    // remove fast-flash class to restore normal transitions
+    setTimeout(()=> document.body.classList.remove('fast-flash'), 50);
+  }, 210);
+}
+
+// Firebase horns listener
 const hornsRef = db.ref('horns');
 hornsRef.limitToLast(50).on('child_added', snap=>{
   const data = snap.val();
@@ -219,13 +229,12 @@ function handleHorn(data){
   lastFrom.textContent = data.senderId + ' @ ' + new Date(data.timestamp).toLocaleTimeString();
 
   if (myLat != null && myLon != null && data.lat != null && data.lon != null) {
-    const b = bearingDegrees(myLat, myLon, data.lat, data.lon); // bearing from me -> sender
+    const b = bearingDegrees(myLat, myLon, data.lat, data.lon);
     const d = Math.round(distanceMeters(myLat, myLon, data.lat, data.lon));
     distEl.textContent = d;
     let rel;
     if (myHeading == null || isNaN(myHeading)) {
-      // no compass: just point arrow to bearing (assume phone front is top)
-      rel = b;
+      rel = b; // no heading: show absolute bearing relative to phone top
       dbg('no heading — using GPS bearing', Math.round(b));
     } else {
       rel = (b - myHeading + 360) % 360;
@@ -239,25 +248,24 @@ function handleHorn(data){
     dbg('missing coords: myLat/myLon or sender lat/lon');
   }
 
-  // try play; if blocked fallback to vibration + big visual flash
+  // play sound if unlocked, otherwise fallback to vibrate + flash
   alertSound.play().then(()=> {
     dbg('played sound');
+    // still do a visible flash to emphasize
+    strongFlash();
   }).catch(err => {
-    dbg('play failed, fallback to vibrate/flash', err && err.message);
+    dbg('play failed, fallback', err && err.message);
     if (navigator.vibrate) navigator.vibrate([200,80,200]);
-    // visual flash
-    document.body.style.background = '#fff6e6';
-    setTimeout(()=> document.body.style.background = 'white', 250);
+    strongFlash();
   });
 
-  // write debug last payload
+  // debug
   dbg('payload', data);
 }
 
-// horn send
+// send horn
 hornBtn.addEventListener('click', ()=> {
-  if (navigator.geolocation) {
-    // ensure we have latest position (watchPosition is running, but getCurrentPosition ensures immediate)
+  if (navigator.geolocation){
     navigator.geolocation.getCurrentPosition(p=>{
       myLat = p.coords.latitude; myLon = p.coords.longitude;
       sendHorn();
@@ -266,28 +274,21 @@ hornBtn.addEventListener('click', ()=> {
 });
 
 function sendHorn(){
-  const payload = {
-    type: 'horn',
-    senderId: myId,
-    timestamp: Date.now(),
-    lat: myLat || null,
-    lon: myLon || null,
-    heading: myHeading || null
-  };
+  const payload = { type:'horn', senderId: myId, timestamp: Date.now(), lat: myLat || null, lon: myLon || null, heading: myHeading || null };
   db.ref('horns').push(payload).then(()=> {
     dbg('horn sent', payload);
-    // local feedback
-    alertSound.play().catch(()=>{ if (navigator.vibrate) navigator.vibrate(150); });
+    alertSound.play().catch(()=> { if (navigator.vibrate) navigator.vibrate(150); });
   }).catch(e=> dbg('send failed', e && e.message));
 }
 
-// small UX: refresh UI
+// UI refresh
 setInterval(()=> {
   myidEl.textContent = myId + (myHeading ? (' • H:'+Math.round(myHeading)+'°') : '');
 }, 1000);
 
-// initial debug message
+// initial message
 dbg('app ready — tap Enable Orientation & Location, then Enable Audio.');
 </script>
 </body>
 </html>
+

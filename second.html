@@ -1,0 +1,323 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Silent Horn — Distance Focused</title>
+<style>
+  :root{
+    --orange:#ff6600; --black:#0b0b0b; --bg:#111; --card:#121212; --muted:#bdbdbd;
+  }
+  html,body{height:100%;margin:0;background:linear-gradient(180deg,#0f0f0f,#111);color:var(--muted);font-family:Inter,system-ui,Segoe UI,Roboto,Arial}
+  .wrap{max-width:820px;margin:18px auto;padding:18px;border-radius:14px;background:linear-gradient(180deg,#0b0b0b,#161616);box-shadow:0 10px 40px rgba(0,0,0,0.6)}
+  header{display:flex;align-items:center;gap:12px}
+  header .title{color:var(--orange);font-weight:800;font-size:20px}
+  header .sub{font-size:12px;color:#ccc}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  button{background:var(--orange);color:#111;border:0;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer}
+  button.ghost{background:transparent;border:1px solid rgba(255,102,0,0.18);color:var(--muted)}
+  .center{display:flex;flex-direction:column;align-items:center;gap:14px;padding:18px 6px}
+  .distanceCard{width:320px;height:220px;border-radius:18px;background:linear-gradient(180deg,#111,#0d0d0d);display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 12px 30px rgba(0,0,0,0.6);border:1px solid rgba(255,102,0,0.06)}
+  .distanceVal{font-size:72px;font-weight:900;color:#fff;letter-spacing:-1px}
+  .distanceUnit{font-size:18px;color:var(--muted);margin-top:6px}
+  .distanceNote{font-size:13px;color:#ddd;margin-top:8px}
+  .distanceCard.alert{
+    box-shadow:0 18px 40px rgba(255,102,0,0.18),0 0 40px rgba(255,102,0,0.06) inset;
+    border:1px solid rgba(255,102,0,0.3);
+    animation: pulseOrange 1000ms infinite ease-in-out;
+  }
+  @keyframes pulseOrange{
+    0%{transform:scale(1);box-shadow:0 18px 40px rgba(255,102,0,0.06)}
+    50%{transform:scale(1.02);box-shadow:0 28px 60px rgba(255,102,0,0.18)}
+    100%{transform:scale(1);box-shadow:0 18px 40px rgba(255,102,0,0.06)}
+  }
+
+  .metaRow{display:flex;gap:12px;justify-content:center;margin-top:10px}
+  .meta{background:#0a0a0a;padding:8px 12px;border-radius:10px;color:#bbb;font-weight:700}
+  .arrowBox{width:160px;height:160px;border-radius:50%;border:6px solid rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;margin-top:6px;position:relative}
+  #needle{width:6px;height:70px;background:var(--orange);position:absolute;bottom:40%;border-radius:6px;transform-origin:50% 90%;transition:transform 240ms cubic-bezier(.2,.9,.2,1)}
+  .footer{margin-top:12px;text-align:center;color:#999;font-size:13px}
+  #debug{width:100%;height:120px;margin-top:12px;background:#080808;color:#9fff9f;padding:8px;border-radius:8px;font-family:monospace;font-size:12px;overflow:auto}
+  .small{font-size:12px;color:#999}
+  /* strong flash */
+  body.fast-flash{transition:background 0s !important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="title">Silent Horn</div>
+      <div class="sub">Distance-focused, non-acoustic vehicle alerts</div>
+    </div>
+  </header>
+
+  <div class="controls">
+    <button id="reqPerm">Enable Location & Orientation</button>
+    <button id="enableAudio" class="ghost">Enable Audio</button>
+    <button id="testTone" class="ghost">Play Test Tone</button>
+    <button id="horn" style="margin-left:auto;background:#ff3b30">HORN</button>
+  </div>
+
+  <div class="center">
+    <div class="distanceCard" id="distanceCard" aria-live="polite">
+      <div class="distanceVal" id="distanceVal">—</div>
+      <div class="distanceUnit" id="distanceUnit">meters</div>
+      <div class="distanceNote small" id="distanceNote">Waiting for GPS fix...</div>
+    </div>
+
+    <div class="metaRow">
+      <div class="meta">Your ID: <span id="myid">...</span></div>
+      <div class="meta">Last from: <span id="lastFrom">—</span></div>
+      <div class="meta">Status: <span id="status">Idle</span></div>
+    </div>
+
+    <div class="arrowBox" title="Approx. bearing (absolute)">
+      <div id="needle" style="transform:rotate(0deg)"></div>
+    </div>
+
+    <div class="footer small">If distance &lt; 20 m, system highlights and suggests short-range sensors.</div>
+
+    <pre id="debug">debug ready...</pre>
+  </div>
+</div>
+
+<!-- audio -->
+<audio id="alertSound" preload="auto">
+  <source src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=">
+</audio>
+
+<!-- Firebase compat -->
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+
+<script>
+/* ========== CONFIG ========= */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDEqx20Id0d8_hayEhk-syuUVNshHUjxcw",
+  authDomain: "silent-a7aae.firebaseapp.com",
+  databaseURL: "https://silent-a7aae-default-rtdb.firebaseio.com",
+  projectId: "silent-a7aae",
+  storageBucket: "silent-a7aae.firebasestorage.app",
+  messagingSenderId: "333807832648",
+  appId: "1:333807832648:web:f26dc85699b30a6301927d"
+};
+
+const TUNING = {
+  positionWindow: 5,    // sliding window size for GPS averaging
+  gpsAlpha: 0.35,       // EMA for distances
+  alertDistanceM: 20,   // distance threshold to highlight
+  dedupMs: 700,
+  extrapolateMs: 300
+};
+/* ========================== */
+
+firebase.initializeApp(FIREBASE_CONFIG);
+const db = firebase.database();
+
+/* UI refs */
+const myidEl = document.getElementById('myid');
+const distanceVal = document.getElementById('distanceVal');
+const distanceUnit = document.getElementById('distanceUnit');
+const distanceNote = document.getElementById('distanceNote');
+const distanceCard = document.getElementById('distanceCard');
+const lastFrom = document.getElementById('lastFrom');
+const status = document.getElementById('status');
+const debugEl = document.getElementById('debug');
+const needle = document.getElementById('needle');
+
+const reqPerm = document.getElementById('reqPerm');
+const enableAudioBtn = document.getElementById('enableAudio');
+const testToneBtn = document.getElementById('testTone');
+const hornBtn = document.getElementById('horn');
+let myId = 'p' + Math.floor(Math.random()*9000+1000);
+myidEl.textContent = myId;
+
+/* state */
+let posWindow = []; // array of {lat, lon, acc, t}
+let smoothDistance = null;
+let lastEvent = {}; // sender -> lastTs
+
+/* debug helper */
+function dbg(...args){ debugEl.textContent = new Date().toLocaleTimeString() + " ▶ " + args.join(' ') + "\n" + debugEl.textContent; }
+
+/* audio unlock */
+const alertSound = document.getElementById('alertSound');
+let audioUnlocked = false;
+enableAudioBtn.addEventListener('click', async ()=>{
+  try{
+    await alertSound.play(); alertSound.pause(); alertSound.currentTime=0;
+    audioUnlocked = true; enableAudioBtn.classList.add('ghost'); enableAudioBtn.textContent='Audio Enabled';
+    dbg('audio unlocked');
+  }catch(e){ dbg('audio unlock failed', e && e.message); }
+});
+testToneBtn.addEventListener('click', ()=> {
+  if (audioUnlocked) alertSound.play().catch(e=>dbg('play', e && e.message));
+  else { alertSound.play().catch(()=>navigator.vibrate && navigator.vibrate(200)); dbg('vibrate fallback'); }
+});
+
+/* enable permissions (geolocation) */
+reqPerm.addEventListener('click', async ()=>{
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(()=>{ dbg('geo granted'); }, e=> dbg('geo denied', e && e.message), {enableHighAccuracy:true});
+  }
+  // orientation permission prompt for iOS
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+    try{ await DeviceOrientationEvent.requestPermission(); dbg('orientation prompted'); }catch(e){ dbg('orientation denied', e && e.message); }
+  }
+  reqPerm.textContent='Permissions Requested';
+});
+
+/* watch position: sliding window + median/avg */
+let watchId=null;
+function startWatch(){
+  if (!navigator.geolocation) { dbg('no geolocation'); status.textContent='No GPS'; return; }
+  if (watchId) return;
+  watchId = navigator.geolocation.watchPosition(p=>{
+    status.textContent='GPS OK';
+    const point = {lat:p.coords.latitude, lon:p.coords.longitude, acc:p.coords.accuracy, t:Date.now()};
+    posWindow.push(point);
+    if (posWindow.length > TUNING.positionWindow) posWindow.shift();
+    dbg('pos', point.lat.toFixed(6), point.lon.toFixed(6), 'acc', Math.round(point.acc));
+  }, err=> { dbg('geo err', err && err.message); status.textContent='GPS Error'; }, {enableHighAccuracy:true, maximumAge:800, timeout:5000});
+}
+startWatch();
+
+/* helper: average position from window */
+function avgPosition(){
+  if (posWindow.length===0) return null;
+  let sx=0, sy=0, sa=0;
+  posWindow.forEach(p=>{ sx+=p.lat; sy+=p.lon; sa+=p.acc||100; });
+  return {lat: sx/posWindow.length, lon: sy/posWindow.length, acc: sa/posWindow.length, t: posWindow[posWindow.length-1].t};
+}
+
+/* geodesy */
+function toRad(d){ return d*Math.PI/180; }
+function toDeg(r){ return r*180/Math.PI; }
+function distanceMeters(lat1,lon1,lat2,lon2){
+  const R=6371000;
+  const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  const c = 2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R*c;
+}
+function bearingDegrees(lat1,lon1,lat2,lon2){
+  const φ1=toRad(lat1), φ2=toRad(lat2), Δλ=toRad(lon2-lon1);
+  const y=Math.sin(Δλ)*Math.cos(φ2), x=Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+  return (toDeg(Math.atan2(y,x))+360)%360;
+}
+
+/* strong flash re-used */
+function strongFlash(){
+  document.body.classList.add('fast-flash');
+  document.body.style.background = '#ffffff';
+  setTimeout(()=> document.body.style.background = '#ff6600', 80);
+  setTimeout(()=> { document.body.style.background = ''; setTimeout(()=>document.body.classList.remove('fast-flash'),50); }, 260);
+}
+
+/* needle rotate helper (absolute bearing) */
+let currentNeedleAngle = 0;
+function rotateNeedle(angle){
+  angle = ((angle%360)+360)%360;
+  const diff = ((angle - currentNeedleAngle + 540) % 360) - 180;
+  currentNeedleAngle = (currentNeedleAngle + diff);
+  needle.style.transform = `rotate(${currentNeedleAngle}deg)`;
+}
+
+/* EMA for distance smoothing */
+function ema(prev, v, alpha){ if (prev==null) return v; return prev*(1-alpha)+v*alpha; }
+
+/* DB listener */
+const hornsRef = db.ref('horns');
+hornsRef.limitToLast(50).on('child_added', snap=>{
+  const data = snap.val();
+  if (!data) return;
+  const sender = data.senderId;
+  const now = Date.now();
+  if ((lastEvent[sender]||0) + TUNING.dedupMs > now){ dbg('dedup', sender); return; }
+  lastEvent[sender]=now;
+  dbg('horn', sender, 'ts', data.timestamp);
+  handleHorn(data);
+});
+
+/* handle incoming horn */
+function handleHorn(data){
+  lastFrom.textContent = data.senderId + ' @ ' + new Date(data.timestamp).toLocaleTimeString();
+  const own = avgPosition();
+  if (!own){ dbg('no own pos'); distanceVal.textContent='—'; distanceNote.textContent='Waiting for GPS fix...'; strongFlash(); navigator.vibrate && navigator.vibrate(150); return; }
+
+  // extrapolate sender if speed+heading present
+  let sLat = data.lat, sLon = data.lon;
+  if (data.heading != null && data.speed != null && data.timestamp){
+    const ageMs = Date.now() - data.timestamp + TUNING.extrapolateMs;
+    const dt = Math.max(0, ageMs)/1000;
+    const d = (data.speed || 0) * dt; // meters
+    // move point by d along heading
+    const R = 6371000;
+    const brng = toRad(data.heading);
+    const lat1 = toRad(sLat), lon1 = toRad(sLon);
+    const lat2 = Math.asin(Math.sin(lat1)*Math.cos(d/R) + Math.cos(lat1)*Math.sin(d/R)*Math.cos(brng));
+    const lon2 = lon1 + Math.atan2(Math.sin(brng)*Math.sin(d/R)*Math.cos(lat1), Math.cos(d/R)-Math.sin(lat1)*Math.sin(lat2));
+    sLat = lat2*180/Math.PI; sLon = lon2*180/Math.PI;
+  }
+
+  // compute raw distance + bearing
+  const rawDist = Math.round(distanceMeters(own.lat, own.lon, sLat, sLon));
+  const rawBear = bearingDegrees(own.lat, own.lon, sLat, sLon);
+
+  // update needle (absolute bearing)
+  rotateNeedle(rawBear);
+
+  // smooth distance
+  smoothDistance = ema(smoothDistance, rawDist, TUNING.gpsAlpha);
+
+  // update UI prominently
+  distanceVal.textContent = Math.round(smoothDistance);
+  distanceNote.textContent = `Approx. distance (smoothed). GPS acc: ${Math.round(own.acc)} m`;
+  status.textContent = 'Alert received';
+
+  // highlight when close
+  if (smoothDistance <= TUNING.alertDistanceM){
+    distanceCard.classList.add('alert');
+    // flash + vibrate + sound
+    strongFlash();
+    if (audioUnlocked) alertSound.play().catch(()=>navigator.vibrate && navigator.vibrate(180));
+    else navigator.vibrate && navigator.vibrate([200,80,200]);
+  } else {
+    distanceCard.classList.remove('alert');
+    // subtle flash
+    strongFlash();
+    if (audioUnlocked) alertSound.play().catch(()=>{});
+  }
+
+  // debug
+  dbg('rawDist', rawDist, 'smooth', Math.round(smoothDistance), 'bear', Math.round(rawBear));
+}
+
+/* send horn */
+hornBtn.addEventListener('click', ()=>{
+  const own = avgPosition();
+  const payload = {
+    type:'horn',
+    senderId: myId,
+    timestamp: Date.now(),
+    lat: own ? own.lat : null,
+    lon: own ? own.lon : null,
+    heading: null,
+    speed: null
+  };
+  db.ref('horns').push(payload).then(()=> { dbg('horn sent', payload); if (audioUnlocked) alertSound.play().catch(()=>{}); else navigator.vibrate && navigator.vibrate(120); }).catch(e=> dbg('send failed', e && e.message));
+});
+
+/* small UI tick */
+setInterval(()=>{ // refresh status
+  const own = avgPosition();
+  if (own){
+    distanceNote.textContent = `GPS acc: ${Math.round(own.acc)} m • pts:${posWindow.length}`;
+  }
+},1000);
+
+dbg('distance-focused app ready');
+</script>
+</body>
+</html>

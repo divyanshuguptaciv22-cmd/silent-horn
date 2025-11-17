@@ -1,0 +1,409 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Silent Horn — Advanced (Sensor Fusion & Smoothing)</title>
+<style>
+  :root {
+    --orange:#ff6600; --bg:#ffffff; --muted:#777;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Roboto,Arial;color:#111}
+  header{padding:12px;background:var(--orange);color:#fff;text-align:center}
+  main{display:flex;flex-direction:column;gap:10px;padding:14px;align-items:center;min-height:calc(100vh-120px)}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  button{padding:10px 14px;border-radius:10px;border:0;background:#111;color:#fff;font-weight:600}
+  .big{font-size:18px;padding:12px 18px;border-radius:10px;background:#111}
+  #horn{font-size:22px;padding:14px 18px;border-radius:16px;background:#ff3b30;color:#fff;border:0}
+  #arrow{width:260px;height:260px;border-radius:50%;border:6px solid #eee;display:flex;align-items:center;justify-content:center;position:relative;background:linear-gradient(180deg,#fff,#fff)}
+  #needle{width:8px;height:100px;background:var(--orange);position:absolute;bottom:50%;border-radius:6px;transform-origin:50% 90%;transition:transform 220ms cubic-bezier(.2,.9,.2,1);box-shadow:0 8px 16px rgba(0,0,0,0.18)}
+  .info{font-size:14px;color:#333}
+  .muted{color:var(--muted)}
+  #statusBar{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+  #debug{width:94%;max-width:920px;height:150px;overflow:auto;background:#111;color:#0f0;font-family:monospace;padding:8px;border-radius:8px;font-size:12px}
+  .meter{display:inline-block;padding:6px 10px;border-radius:10px;background:#f3f3f3;color:#111;font-weight:700}
+  footer{padding:8px;text-align:center;font-size:12px;color:var(--muted)}
+  /* confidence gauge */
+  .gauge { width:160px; height:22px; background:#eee;border-radius:12px; overflow:hidden; display:inline-block; vertical-align:middle }
+  .gauge > i { display:block; height:100%; background:var(--orange); width:0%; transition:width 400ms ease-out }
+  .small { font-size:12px; color:var(--muted) }
+  /* flash class unchanged; strongFlash still available */
+  body.fast-flash{transition:background 0s !important}
+</style>
+</head>
+<body>
+<header><strong>Silent Horn — Advanced</strong></header>
+<main>
+  <div class="info">Your ID: <span id="myid">...</span></div>
+
+  <div class="controls">
+    <button id="reqPerm" class="big">Enable Orientation & Location</button>
+    <button id="enableAudio" class="big">Enable Audio</button>
+    <button id="testTone" class="big" style="background:#666">Play Test Tone</button>
+  </div>
+
+  <div id="arrow" aria-hidden="true">
+    <div id="needle"></div>
+    <!-- compass ring marks -->
+    <svg width="260" height="260" style="position:absolute;pointer-events:none">
+      <g transform="translate(130,130)">
+        <!-- N label -->
+        <text x="0" y="-110" text-anchor="middle" font-size="18" fill="#333">N</text>
+        <!-- ticks -->
+        <g stroke="#ddd" stroke-width="1">
+          <!-- draw 12 ticks -->
+          <g id="ticks"></g>
+        </g>
+      </g>
+    </svg>
+  </div>
+
+  <div class="info">Relative: <span id="rel">—</span> | Distance: <span id="dist">—</span> m</div>
+
+  <div id="statusBar">
+    <div class="meter">Heading: <span id="headingVal">—</span>°</div>
+    <div class="meter">GPS acc: <span id="gpsAcc">—</span> m</div>
+    <div class="meter">Confidence: <span id="confPct">—</span></div>
+    <div class="meter small">Short-range: <span id="srHint">—</span></div>
+  </div>
+
+  <button id="horn" class="big" style="background:#ff3b30">HORN 🔊</button>
+
+  <div class="info">Last horn from: <span id="lastFrom">—</span></div>
+
+  <div style="display:flex;gap:8px">
+    <button id="calibrate" class="big">Calibrate</button>
+  </div>
+
+  <div style="width:94%;max-width:920px;margin-top:10px;">
+    <div style="font-weight:700;margin-bottom:6px">Debug</div>
+    <pre id="debug">debug ready...</pre>
+  </div>
+</main>
+
+<footer>Confidence combines GPS accuracy, heading availability, and message age. <span class="muted">Tip: move outdoors for better GPS.</span></footer>
+
+<!-- short beep -->
+<audio id="alertSound" preload="auto">
+  <source src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="/>
+</audio>
+
+<!-- Firebase SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+
+<script>
+/* ================= CONFIG & TUNABLES =================
+   Adjust smoothing alphas and thresholds here for tuning.
+======================================================*/
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDEqx20Id0d8_hayEhk-syuUVNshHUjxcw",
+  authDomain: "silent-a7aae.firebaseapp.com",
+  databaseURL: "https://silent-a7aae-default-rtdb.firebaseio.com",
+  projectId: "silent-a7aae",
+  storageBucket: "silent-a7aae.firebasestorage.app",
+  messagingSenderId: "333807832648",
+  appId: "1:333807832648:web:f26dc85699b30a6301927d"
+};
+
+const CFG = {
+  gpsAlpha: 0.35,           // smoothing for GPS (0..1, higher = smoother)
+  headingAlpha: 0.25,       // smoothing for heading (comp filter)
+  gpsMaxAgeMs: 8000,        // if last fix older than this, confidence low
+  maxEventAgeMs: 3000,      // if message older than this, reduce confidence
+  extrapolateMs: 300,       // predict sender position by this ms using sender heading
+  dedupWindowMs: 700,      // ignore repeated horns within this window from same sender
+  strongFlashEnabled: true
+};
+/* ===================================================== */
+
+firebase.initializeApp(FIREBASE_CONFIG);
+const db = firebase.database();
+
+/* ===== UI refs ===== */
+const myidEl = document.getElementById('myid');
+const hornBtn = document.getElementById('horn');
+const reqPerm = document.getElementById('reqPerm');
+const enableAudioBtn = document.getElementById('enableAudio');
+const testToneBtn = document.getElementById('testTone');
+const needle = document.getElementById('needle');
+const relEl = document.getElementById('rel');
+const distEl = document.getElementById('dist');
+const lastFrom = document.getElementById('lastFrom');
+const debugEl = document.getElementById('debug');
+const headingVal = document.getElementById('headingVal');
+const gpsAccEl = document.getElementById('gpsAcc');
+const confPctEl = document.getElementById('confPct');
+const srHint = document.getElementById('srHint');
+
+let myId = 'p' + Math.floor(Math.random()*9000+1000);
+myidEl.textContent = myId;
+
+/* ===== state for sensor fusion ===== */
+let rawLat=null, rawLon=null, rawAcc=null, rawTime=0;
+let smoothLat=null, smoothLon=null, smoothAcc=999;
+let rawHeading=null, smoothHeading=null; // degrees 0-360
+let audioUnlocked=false;
+let lastEventTimestamps = {}; // senderId -> lastReceivedTime
+
+/* ===== debug helper ===== */
+function dbg(...a){
+  const t = new Date().toLocaleTimeString();
+  debugEl.textContent = `${t} ▶ ${a.map(x=> typeof x==='object'?JSON.stringify(x):x).join(' ')}\n` + debugEl.textContent;
+}
+
+/* ===== audio unlock & test ===== */
+enableAudioBtn.addEventListener('click', async ()=>{
+  try {
+    await alertSound.play();
+    alertSound.pause(); alertSound.currentTime=0;
+    audioUnlocked=true; enableAudioBtn.classList.add('muted');
+    dbg('Audio unlocked');
+  } catch(e){ dbg('audio unlock failed', e && e.message); }
+});
+testToneBtn.addEventListener('click', ()=> {
+  if (audioUnlocked) alertSound.play().catch(e=>dbg('play',e&&e.message));
+  else { alertSound.play().catch(()=>navigator.vibrate && navigator.vibrate(200)); dbg('vibrate fallback'); }
+});
+
+/* ===== GPS smoothing (EMA) ===== */
+function updateSmoothedGPS(lat, lon, acc){
+  const a = CFG.gpsAlpha;
+  if (smoothLat==null){
+    smoothLat = lat; smoothLon = lon; smoothAcc = acc || 999;
+  } else {
+    smoothLat = smoothLat*(1-a) + lat*a;
+    smoothLon = smoothLon*(1-a) + lon*a;
+    smoothAcc = smoothAcc*(1-a) + (acc||999)*a;
+  }
+  rawTime = Date.now();
+  gpsAccEl.textContent = (smoothAcc==null? '—' : Math.round(smoothAcc) + ' m');
+}
+
+/* ===== heading complementary filter =====
+   We combine device compass (rawHeading) with GPS bearing when available.
+   finalHeading = alpha*compass + (1-alpha)*gpsBearing
+*/
+function fuseHeading(compassDeg, gpsBearing){
+  // if compass absent, rely on gpsBearing
+  if (compassDeg==null && gpsBearing==null) return null;
+  if (compassDeg==null) return gpsBearing;
+  if (gpsBearing==null) return compassDeg;
+  // normalize shortest angle
+  let a = compassDeg, b = gpsBearing;
+  // compute difference in [-180,180]
+  let diff = ((b - a + 540) % 360) - 180;
+  // adjust compass slightly towards gps bearing
+  const alpha = CFG.headingAlpha;
+  const fused = (a + alpha*diff + 360) % 360;
+  return fused;
+}
+
+/* ===== position -> bearing & distance helpers ===== */
+function toRad(d){ return d*Math.PI/180; }
+function toDeg(r){ return r*180/Math.PI; }
+function bearingDegrees(lat1, lon1, lat2, lon2){
+  const φ1 = toRad(lat1), φ2 = toRad(lat2), Δλ = toRad(lon2-lon1);
+  const y = Math.sin(Δλ)*Math.cos(φ2);
+  const x = Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+  let θ = Math.atan2(y,x);
+  return (toDeg(θ)+360)%360;
+}
+function distanceMeters(lat1,lon1,lat2,lon2){
+  const R = 6371000;
+  const dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  const c = 2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R*c;
+}
+
+/* ===== watchPosition for continuous GPS ===== */
+let watchId=null;
+function startWatchPosition(){
+  if (!navigator.geolocation) { dbg('no geolocation'); return; }
+  if (watchId!=null) return;
+  watchId = navigator.geolocation.watchPosition(p=>{
+    rawLat = p.coords.latitude; rawLon = p.coords.longitude; rawAcc = p.coords.accuracy;
+    updateSmoothedGPS(rawLat, rawLon, rawAcc);
+    dbg('gps', rawLat.toFixed(6), rawLon.toFixed(6), 'acc', Math.round(rawAcc));
+  }, err=>{
+    dbg('geo err', err && err.message);
+  }, { enableHighAccuracy:true, maximumAge:800, timeout:5000 });
+}
+startWatchPosition();
+
+/* ===== orientation handling ===== */
+window.addEventListener('deviceorientationabsolute', e=>{
+  if (e && e.alpha != null){ rawHeading = (360 - e.alpha) % 360; dbg('compass abs', Math.round(rawHeading)); updateFusedHeading(); }
+});
+window.addEventListener('deviceorientation', e=>{
+  if (e && e.alpha != null){ rawHeading = (360 - e.alpha) % 360; dbg('compass', Math.round(rawHeading)); updateFusedHeading(); }
+});
+function updateFusedHeading(){
+  // if we have a recent gps bearing from saved last sender/ping, we can compute gps bearing to last known sender? Here we use no sender: fused heading with null gpsBearing -> compass only
+  // But when handling an incoming horn we compute fused heading with gps bearing from own movement.
+  smoothHeading = smoothHeading==null? rawHeading : (smoothHeading*(1-CFG.headingAlpha) + rawHeading*CFG.headingAlpha);
+  headingVal.textContent = smoothHeading==null ? '—' : Math.round(smoothHeading);
+}
+
+/* ===== UI tick: render compass ticks (once) ===== */
+(function renderTicks(){
+  const ticksGroup = document.querySelector('svg #ticks');
+  if (!ticksGroup) return;
+  for(let i=0;i<12;i++){
+    const angle = (i/12)*360;
+    const x1 = Math.sin(angle*Math.PI/180)*95;
+    const y1 = -Math.cos(angle*Math.PI/180)*95;
+    const x2 = Math.sin(angle*Math.PI/180)*105;
+    const y2 = -Math.cos(angle*Math.PI/180)*105;
+    const ln = document.createElementNS('http://www.w3.org/2000/svg','line');
+    ln.setAttribute('x1',x1); ln.setAttribute('y1',y1); ln.setAttribute('x2',x2); ln.setAttribute('y2',y2);
+    ln.setAttribute('stroke','#ddd'); ln.setAttribute('stroke-width','2');
+    ticksGroup.appendChild(ln);
+  }
+})();
+
+/* ===== strongFlash (keeps same timings) ===== */
+function strongFlash(){
+  document.body.classList.add('fast-flash');
+  document.body.style.background = '#ffffff';
+  setTimeout(()=> document.body.style.background = getComputedStyle(document.documentElement).getPropertyValue('--orange').trim() || '#ff6600', 70);
+  setTimeout(()=> { document.body.style.background = 'white'; setTimeout(()=>document.body.classList.remove('fast-flash'), 50); }, 210);
+}
+
+/* ===== confidence calculator =====
+   Uses GPS accuracy, message age and whether heading exists.
+   Returns 0..1
+*/
+function computeConfidence(gpsAcc, messageAgeMs, hasHeading){
+  // gpsAcc: meters (lower better). messageAgeMs: ms (lower better)
+  let g = Math.min(1, 50 / (gpsAcc || 1000)); // if acc=5m -> g = 10 -> cap ->1
+  let ageFactor = Math.max(0, 1 - (messageAgeMs / CFG.maxEventAgeMs));
+  let headingFactor = hasHeading ? 1 : 0.6;
+  let conf = g * 0.6 + ageFactor*0.3 + (headingFactor*0.1);
+  return Math.max(0, Math.min(1, conf));
+}
+
+/* ===== event handling: horns ===== */
+const hornsRef = db.ref('horns');
+
+hornsRef.limitToLast(50).on('child_added', snap=>{
+  const data = snap.val();
+  if (!data) return;
+  // dedup by sender
+  const sender = data.senderId;
+  const now = Date.now();
+  const last = lastEventTimestamps[sender] || 0;
+  if (now - last < CFG.dedupWindowMs) { dbg('dedup ignore', sender); return; }
+  lastEventTimestamps[sender] = now;
+  dbg('horn received', sender, 'ts', data.timestamp);
+  handleHorn(data);
+});
+
+function handleHorn(data){
+  lastFrom.textContent = data.senderId + ' @ ' + new Date(data.timestamp).toLocaleTimeString();
+  // compute message age
+  const now = Date.now();
+  const age = now - (data.timestamp || now);
+  // extrapolate sender position a bit using sender heading (dead reckoning)
+  let senderLat = data.lat, senderLon = data.lon;
+  if (data.heading != null && data.speed != null && data.timestamp){
+    // simple linear extrapolation: distance = speed*(age+CFG.extrapolateMs)/1000
+    const dt = (age + CFG.extrapolateMs)/1000; // seconds
+    const d = (data.speed || 0) * dt; // meters
+    // move sender lat/lon by d along heading
+    const R = 6371000;
+    const brng = toRad(data.heading);
+    const lat1 = toRad(senderLat), lon1 = toRad(senderLon);
+    const lat2 = Math.asin( Math.sin(lat1)*Math.cos(d/R) + Math.cos(lat1)*Math.sin(d/R)*Math.cos(brng) );
+    const lon2 = lon1 + Math.atan2(Math.sin(brng)*Math.sin(d/R)*Math.cos(lat1), Math.cos(d/R)-Math.sin(lat1)*Math.sin(lat2));
+    senderLat = lat2*180/Math.PI; senderLon = lon2*180/Math.PI;
+  }
+
+  // if we have own smoothed GPS, compute bearing + distance
+  if (smoothLat!=null && smoothLon!=null && senderLat!=null && senderLon!=null){
+    const b = bearingDegrees(smoothLat, smoothLon, senderLat, senderLon);
+    const d = Math.round(distanceMeters(smoothLat, smoothLon, senderLat, senderLon));
+    // pick GPS-based bearing for fusion
+    // fuse heading: use own compass + gps bearing to refine own heading if possible
+    const fusedOwnHeading = fuseHeading(smoothHeading, null); // no own gps bearing here
+    // relative angle = bearing - fusedOwnHeading (if available) else absolute bearing
+    let rel;
+    if (fusedOwnHeading==null) rel = b;
+    else rel = (b - fusedOwnHeading + 360) % 360;
+
+    // compute confidence
+    const conf = computeConfidence(smoothAcc, age, fusedOwnHeading!=null);
+    // update UI values with smoothing
+    relEl.textContent = Math.round(rel) + '°';
+    distEl.textContent = d;
+    headingVal.textContent = fusedOwnHeading==null? '—' : Math.round(fusedOwnHeading);
+    gpsAccEl.textContent = Math.round(smoothAcc) + ' m';
+    confPctEl.textContent = Math.round(conf*100) + '%';
+    // short-range hint
+    srHint.textContent = d <= 10 ? 'Consider IR/Bluetooth for <10m' : '—';
+    // animate needle smoothly to new relative angle using shortest rotation
+    animateNeedleTo(rel);
+
+    // audible & flash & vibration
+    alertSound.play().then(()=>{ dbg('played sound'); if (CFG.strongFlashEnabled) strongFlash(); }).catch(err=>{
+      dbg('play failed', err && err.message); if (navigator.vibrate) navigator.vibrate([200,80,200]); if (CFG.strongFlashEnabled) strongFlash();
+    });
+    dbg('computed b,d,conf,age', Math.round(b), d, Math.round(conf*100), age);
+  } else {
+    // missing own position
+    relEl.textContent = '—'; distEl.textContent = '—'; confPctEl.textContent = '0%';
+    dbg('missing own GPS to compute bearing');
+    // still fallback flash/vibrate
+    if (CFG.strongFlashEnabled) strongFlash();
+    if (navigator.vibrate) navigator.vibrate(200);
+  }
+}
+
+/* ===== needle animation helper: rotate shortest path ===== */
+let currentAngle = 0;
+function animateNeedleTo(targetAngle){
+  // normalize
+  targetAngle = ((targetAngle%360)+360)%360;
+  let diff = ((targetAngle - currentAngle + 540) % 360) - 180;
+  // clamp rotation step by step for smoothness
+  currentAngle = (currentAngle + diff);
+  needle.style.transform = `rotate(${currentAngle}deg)`;
+}
+
+/* ===== sending horn (attach speed if available) ===== */
+hornBtn.addEventListener('click', ()=>{
+  if (navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(p=>{
+      rawLat = p.coords.latitude; rawLon = p.coords.longitude; rawAcc = p.coords.accuracy;
+      updateSmoothedGPS(rawLat, rawLon, rawAcc);
+      sendHorn();
+    }, ()=> sendHorn(), { enableHighAccuracy:true, maximumAge:2000, timeout:4000 });
+  } else sendHorn();
+});
+
+function sendHorn(){
+  // attempt to get device speed if available via Geolocation (may be null)
+  const payload = {
+    type:'horn',
+    senderId: myId,
+    timestamp: Date.now(),
+    lat: rawLat || null,
+    lon: rawLon || null,
+    heading: smoothHeading || null,
+    speed: null
+  };
+  // push to DB
+  db.ref('horns').push(payload).then(()=> { dbg('horn sent', payload); alertSound.play().catch(()=>navigator.vibrate && navigator.vibrate(150)); }).catch(e=>dbg('send failed', e && e.message));
+}
+
+/* ===== UI refresh tick for debug ===== */
+setInterval(()=> {
+  // show last known smooth coords
+  dbg('state', {smoothLat: smoothLat, smoothLon: smoothLon, smoothAcc: Math.round(smoothAcc||999), smoothHeading: smoothHeading});
+}, 7000);
+
+dbg('advanced app ready — enable permissions & audio.');
+</script>
+</body>
+</html>
